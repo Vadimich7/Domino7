@@ -3,30 +3,72 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, maximum-scale=1.0, touch-action: none">
-    <title>Доминоты</title>
+    <title>Домино 2–4 игрока (мобильная адаптация)</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; user-select: none; }
         body { background: #2e5a3b; overflow: hidden; font-family: Arial, sans-serif; touch-action: pan-x pan-y; height: 100vh; width: 100vw; }
-        #topBar { position: fixed; top: 0; left: 0; right: 0; height: 44px; background: rgba(30,30,30,0.9); display: flex; align-items: center; padding: 0 8px; z-index: 20; gap: 6px; }
-        #playersBar { position: fixed; top: 44px; left: 0; right: 0; min-height: 44px; background: rgba(50,50,50,0.9); display: flex; align-items: center; padding: 4px 8px; z-index: 19; gap: 6px; flex-wrap: wrap; }
-        .btn, select, .player-select { background: #e0e0e0; border: none; border-radius: 6px; padding: 6px 10px; font-size: 13px; font-weight: bold; color: #222; touch-action: manipulation; white-space: nowrap; }
+
+        #topBar {
+            position: fixed; top: 0; left: 0; right: 0; height: 44px; background: rgba(30,30,30,0.9);
+            display: flex; align-items: center; padding: 0 6px; z-index: 20; gap: 4px;
+        }
+        #playersBar {
+            position: fixed; top: 44px; left: 0; right: 0; min-height: 44px; background: rgba(50,50,50,0.9);
+            display: flex; align-items: center; padding: 2px 6px; z-index: 19; gap: 4px; flex-wrap: wrap;
+        }
+
+        .btn, select, .player-select {
+            background: #e0e0e0; border: none; border-radius: 5px; padding: 5px 8px; font-size: 13px; font-weight: bold;
+            color: #222; touch-action: manipulation; white-space: nowrap;
+        }
         .btn:active { background: #bbb; }
-        .btn-add { background: #4a8; color: white; font-size: 14px; padding: 8px 14px; border: none; border-radius: 8px; font-weight: bold; touch-action: manipulation; }
+        .btn-add {
+            background: #4a8; color: white; font-size: 14px; padding: 7px 12px; border: none; border-radius: 7px;
+            font-weight: bold; touch-action: manipulation;
+        }
         .btn-add:active { background: #3a7; }
         .btn-add:disabled { background: #666; color: #aaa; pointer-events: none; }
-        .player-panel { display: flex; align-items: center; background: rgba(255,255,255,0.15); border-radius: 8px; padding: 4px 8px; gap: 6px; font-size: 13px; color: white; }
+
+        .player-panel {
+            display: flex; align-items: center; background: rgba(255,255,255,0.15); border-radius: 7px; padding: 2px 6px;
+            gap: 4px; font-size: 13px; color: white;
+        }
         .player-panel span { font-weight: bold; white-space: nowrap; }
-        .player-panel select { font-size: 13px; padding: 4px 6px; }
-        .player-panel .btn-del { background: #c44; color: white; border-radius: 4px; width: 24px; height: 24px; display: flex; align-items: center; justify-content: center; font-size: 16px; line-height: 1; padding: 0; }
-        #statusText { flex: 1; text-align: center; color: white; font-size: 14px; font-weight: bold; text-shadow: 1px 1px 2px black; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-        #sidePanel { position: fixed; z-index: 30; background: rgba(255,255,220,0.95); border: 2px solid #888; border-radius: 10px; display: none; align-items: center; justify-content: center; gap: 10px; padding: 8px 12px; font-weight: bold; }
+        .player-panel select { font-size: 13px; padding: 3px 4px; }
+        .player-panel .btn-del {
+            background: #c44; color: white; border-radius: 4px; width: 22px; height: 22px; display: flex;
+            align-items: center; justify-content: center; font-size: 16px; line-height: 1; padding: 0;
+        }
+
+        #statusText {
+            flex: 1; text-align: center; color: white; font-size: 14px; font-weight: bold;
+            text-shadow: 1px 1px 2px black; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+        }
+
+        #sidePanel {
+            position: fixed; z-index: 30; background: rgba(255,255,220,0.95); border: 2px solid #888; border-radius: 10px;
+            display: none; align-items: center; justify-content: center; gap: 8px; padding: 6px 10px; font-weight: bold;
+        }
         #btnAction {
-            position: fixed; z-index: 25; min-width: 150px; height: 50px; font-size: 18px; font-weight: bold;
+            position: fixed; z-index: 25; min-width: 140px; height: 48px; font-size: 18px; font-weight: bold;
             background: #f0a040; border: 3px solid #b07020; border-radius: 12px; color: #222;
-            touch-action: manipulation; box-shadow: 0 4px 8px rgba(0,0,0,0.4); display: none; left: 50%; transform: translateX(-50%);
+            touch-action: manipulation; box-shadow: 0 4px 8px rgba(0,0,0,0.4);
+            display: none; left: 50%; transform: translateX(-50%);
         }
         #btnAction:active { background: #d89030; }
+
         canvas { display: block; position: absolute; top: 0; left: 0; touch-action: none; }
+
+        /* Мобильная адаптация */
+        @media (max-width: 600px) {
+            #topBar { height: 36px; }
+            #playersBar { top: 36px; min-height: 36px; }
+            .btn, select, .player-select { font-size: 11px; padding: 3px 6px; }
+            .btn-add { font-size: 12px; padding: 5px 8px; }
+            .player-panel { font-size: 11px; padding: 1px 4px; }
+            #statusText { font-size: 12px; }
+            #btnAction { min-width: 130px; height: 42px; font-size: 16px; }
+        }
     </style>
 </head>
 <body>
@@ -72,18 +114,18 @@
     const halfImages = {};
 
     function loadHalfImages() {
-    const promises = [];
-    for (let i = 1; i <= 7; i++) {
-        const img = new Image();
-        img.src = `${i}.png`; // теперь ищем картинки прямо в корне сайта
-        halfImages[i] = img;
-        promises.push(new Promise((resolve) => {
-            img.onload = resolve;
-            img.onerror = () => { delete halfImages[i]; resolve(); };
-        }));
+        const promises = [];
+        for (let i = 1; i <= 7; i++) {
+            const img = new Image();
+            img.src = `${i}.png`; // картинки в корне сайта
+            halfImages[i] = img;
+            promises.push(new Promise((resolve) => {
+                img.onload = resolve;
+                img.onerror = () => { delete halfImages[i]; resolve(); };
+            }));
+        }
+        return Promise.all(promises);
     }
-    return Promise.all(promises);
-}
 
     function renderPlayersBar() {
         const oldConfigs = playerPanels.map(p => p.select.value);
@@ -143,7 +185,9 @@
         renderPlayersBar();
     }
 
-    function getTopOffset() { return document.getElementById('topBar').offsetHeight + playersBar.offsetHeight; }
+    function getTopOffset() {
+        return document.getElementById('topBar').offsetHeight + playersBar.offsetHeight;
+    }
 
     function resizeCanvas() {
         canvas.width = window.innerWidth;
@@ -155,8 +199,10 @@
     }
 
     function computeTileSize() {
-        const maxTileW = Math.min((canvas.width - 40) / 8, 70);
-        TILE_W = Math.max(40, maxTileW);
+        const isMobile = window.innerWidth < 600;
+        const maxInRow = isMobile ? 6 : 8;        // на телефоне помещается меньше костей в ряд, зато крупнее
+        const maxTileW = Math.min((canvas.width - 40) / maxInRow, isMobile ? 85 : 70);
+        TILE_W = Math.max(isMobile ? 50 : 40, maxTileW);
         TILE_H = TILE_W * 2;
         GAP = Math.max(3, Math.floor(TILE_W / 10));
     }
@@ -495,8 +541,6 @@
         ctx.translate(cameraX, cameraY);
 
         let leftLimit = 10, rightLimit = canvas.width - 10, topLimit = getTopOffset() + 5;
-        // Раньше bottomLimit ограничивал обрезку, теперь он не используется для обрезки, но для определения начальной позиции рук всё ещё может пригодиться.
-        // Убираем bottomLimit совсем.
         for (let i = 0; i < players.length; i++) {
             if (players[i].hand.length === 0) continue;
             const rect = getPlayerHandRect(i);
@@ -537,7 +581,7 @@
                 const effH = isDouble ? TILE_H : TILE_W;
                 if (effH > rowHeight) rowHeight = effH;
             }
-            // Больше не обрезаем: убираем проверку на bottomLimit
+            // Все строки рисуются без обрезки (прокрутка)
             for (const tile of row.tiles) {
                 const isDouble = (tile.v1 === tile.v2);
                 const effW = isDouble ? TILE_W : TILE_H;
@@ -556,7 +600,6 @@
             y += rowHeight + GAP;
         }
 
-        // Маркеры концов (всё в скроллируемом пространстве)
         if (rowData.length > 0 && table.length > 0) {
             const firstRow = rowData[0];
             const lastRow = rowData[rowData.length - 1];
@@ -606,7 +649,6 @@
             ctx.fillRect(0, 0, canvas.width, canvas.height);
             if (players.length > 0) {
                 drawTable();
-                // Руки рисуем без трансляции камеры (в абсолютных координатах)
                 for (let i = 0; i < players.length; i++) drawHand(players[i], i);
             }
             if (btnAction.style.display === 'block') positionActionButton();
