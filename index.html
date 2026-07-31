@@ -72,18 +72,18 @@
     const halfImages = {};
 
     function loadHalfImages() {
-        const promises = [];
-        for (let i = 1; i <= 7; i++) {
-            const img = new Image();
-            img.src = `images/${i}.png`;
-            halfImages[i] = img;
-            promises.push(new Promise((resolve) => {
-                img.onload = resolve;
-                img.onerror = () => { delete halfImages[i]; resolve(); };
-            }));
-        }
-        return Promise.all(promises);
+    const promises = [];
+    for (let i = 1; i <= 7; i++) {
+        const img = new Image();
+        img.src = `${i}.png`; // теперь ищем картинки прямо в корне сайта
+        halfImages[i] = img;
+        promises.push(new Promise((resolve) => {
+            img.onload = resolve;
+            img.onerror = () => { delete halfImages[i]; resolve(); };
+        }));
     }
+    return Promise.all(promises);
+}
 
     function renderPlayersBar() {
         const oldConfigs = playerPanels.map(p => p.select.value);
