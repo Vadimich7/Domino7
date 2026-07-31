@@ -1,0 +1,723 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, maximum-scale=1.0, touch-action: none">
+    <title>Домино 2–4 игрока (прокрутка без обрезки)</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; user-select: none; }
+        body { background: #2e5a3b; overflow: hidden; font-family: Arial, sans-serif; touch-action: pan-x pan-y; height: 100vh; width: 100vw; }
+        #topBar { position: fixed; top: 0; left: 0; right: 0; height: 44px; background: rgba(30,30,30,0.9); display: flex; align-items: center; padding: 0 8px; z-index: 20; gap: 6px; }
+        #playersBar { position: fixed; top: 44px; left: 0; right: 0; min-height: 44px; background: rgba(50,50,50,0.9); display: flex; align-items: center; padding: 4px 8px; z-index: 19; gap: 6px; flex-wrap: wrap; }
+        .btn, select, .player-select { background: #e0e0e0; border: none; border-radius: 6px; padding: 6px 10px; font-size: 13px; font-weight: bold; color: #222; touch-action: manipulation; white-space: nowrap; }
+        .btn:active { background: #bbb; }
+        .btn-add { background: #4a8; color: white; font-size: 14px; padding: 8px 14px; border: none; border-radius: 8px; font-weight: bold; touch-action: manipulation; }
+        .btn-add:active { background: #3a7; }
+        .btn-add:disabled { background: #666; color: #aaa; pointer-events: none; }
+        .player-panel { display: flex; align-items: center; background: rgba(255,255,255,0.15); border-radius: 8px; padding: 4px 8px; gap: 6px; font-size: 13px; color: white; }
+        .player-panel span { font-weight: bold; white-space: nowrap; }
+        .player-panel select { font-size: 13px; padding: 4px 6px; }
+        .player-panel .btn-del { background: #c44; color: white; border-radius: 4px; width: 24px; height: 24px; display: flex; align-items: center; justify-content: center; font-size: 16px; line-height: 1; padding: 0; }
+        #statusText { flex: 1; text-align: center; color: white; font-size: 14px; font-weight: bold; text-shadow: 1px 1px 2px black; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        #sidePanel { position: fixed; z-index: 30; background: rgba(255,255,220,0.95); border: 2px solid #888; border-radius: 10px; display: none; align-items: center; justify-content: center; gap: 10px; padding: 8px 12px; font-weight: bold; }
+        #btnAction {
+            position: fixed; z-index: 25; min-width: 150px; height: 50px; font-size: 18px; font-weight: bold;
+            background: #f0a040; border: 3px solid #b07020; border-radius: 12px; color: #222;
+            touch-action: manipulation; box-shadow: 0 4px 8px rgba(0,0,0,0.4); display: none; left: 50%; transform: translateX(-50%);
+        }
+        #btnAction:active { background: #d89030; }
+        canvas { display: block; position: absolute; top: 0; left: 0; touch-action: none; }
+    </style>
+</head>
+<body>
+<div id="topBar">
+    <button id="btnNewGame" class="btn">Новая</button>
+    <span id="statusText">Нажмите «Новая»</span>
+</div>
+<div id="playersBar"></div>
+<div id="sidePanel">
+    <button id="btnLeft" class="btn">← Влево</button>
+    <button id="btnRight" class="btn">Вправо →</button>
+    <button id="btnCancel" class="btn" style="background:#e88;">Отмена</button>
+</div>
+<button id="btnAction">Базар (0)</button>
+<canvas id="gameCanvas"></canvas>
+
+<script>
+(function() {
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+    const btnNewGame = document.getElementById('btnNewGame');
+    const btnAction = document.getElementById('btnAction');
+    const statusText = document.getElementById('statusText');
+    const sidePanel = document.getElementById('sidePanel');
+    const btnLeft = document.getElementById('btnLeft');
+    const btnRight = document.getElementById('btnRight');
+    const btnCancel = document.getElementById('btnCancel');
+    const playersBar = document.getElementById('playersBar');
+
+    let TILE_W, TILE_H, GAP;
+    let players = [];
+    let table = [];
+    let boneyard = [];
+    let leftEnd = -1, rightEnd = -1;
+    let currentPlayerIndex = 0;
+    let gameOver = false;
+    let statusMessage = 'Нажмите «Новая»';
+    let cameraX = 0, cameraY = 0;
+    let isDragging = false, dragStartX = 0, dragStartY = 0, dragMoved = false;
+    let pendingHandIndex = -1;
+
+    let playerPanels = [];
+    const halfImages = {};
+
+    function loadHalfImages() {
+        const promises = [];
+        for (let i = 1; i <= 7; i++) {
+            const img = new Image();
+            img.src = `images/${i}.png`;
+            halfImages[i] = img;
+            promises.push(new Promise((resolve) => {
+                img.onload = resolve;
+                img.onerror = () => { delete halfImages[i]; resolve(); };
+            }));
+        }
+        return Promise.all(promises);
+    }
+
+    function renderPlayersBar() {
+        const oldConfigs = playerPanels.map(p => p.select.value);
+        playersBar.innerHTML = '';
+        playerPanels = [];
+        for (let i = 0; i < oldConfigs.length; i++) createPlayerPanel(oldConfigs[i] === 'human', i);
+        if (playerPanels.length < 4) {
+            const addBtn = document.createElement('button');
+            addBtn.className = 'btn-add';
+            addBtn.textContent = '➕ Добавить игрока';
+            addBtn.addEventListener('click', () => {
+                if (playerPanels.length >= 4) { alert('Максимум 4 игрока'); return; }
+                createPlayerPanel(true, playerPanels.length);
+                renderPlayersBar();
+            });
+            playersBar.appendChild(addBtn);
+        }
+    }
+
+    function createPlayerPanel(isHuman, index) {
+        const panel = document.createElement('div');
+        panel.className = 'player-panel';
+        const nameSpan = document.createElement('span');
+        nameSpan.textContent = `Игрок ${index + 1}`;
+        const select = document.createElement('select');
+        select.className = 'player-select';
+        const optHuman = document.createElement('option');
+        optHuman.value = 'human'; optHuman.textContent = 'Человек';
+        const optBot = document.createElement('option');
+        optBot.value = 'bot'; optBot.textContent = 'Бот';
+        select.appendChild(optHuman);
+        select.appendChild(optBot);
+        select.value = isHuman ? 'human' : 'bot';
+        const delBtn = document.createElement('button');
+        delBtn.className = 'btn-del';
+        delBtn.innerHTML = '✕';
+        delBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            if (playerPanels.length <= 2) { alert('Минимум 2 игрока!'); return; }
+            const idx = playerPanels.findIndex(p => p.panel === panel);
+            if (idx !== -1) { playerPanels.splice(idx, 1); renderPlayersBar(); if (players.length > 0 && !gameOver) alert('Состав изменён. Начните новую игру.'); }
+        });
+        panel.appendChild(nameSpan);
+        panel.appendChild(select);
+        panel.appendChild(delBtn);
+        playersBar.appendChild(panel);
+        playerPanels.push({ panel, select, nameSpan });
+    }
+
+    function getPlayerConfigs() { return playerPanels.map(p => ({ isHuman: p.select.value === 'human' })); }
+
+    function setupInitialPlayers() {
+        playerPanels = [];
+        playersBar.innerHTML = '';
+        createPlayerPanel(true, 0);
+        createPlayerPanel(false, 1);
+        renderPlayersBar();
+    }
+
+    function getTopOffset() { return document.getElementById('topBar').offsetHeight + playersBar.offsetHeight; }
+
+    function resizeCanvas() {
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+        computeTileSize();
+        updateStatusDisplay();
+        updateActionButton();
+        if (players.length > 0) requestDraw();
+    }
+
+    function computeTileSize() {
+        const maxTileW = Math.min((canvas.width - 40) / 8, 70);
+        TILE_W = Math.max(40, maxTileW);
+        TILE_H = TILE_W * 2;
+        GAP = Math.max(3, Math.floor(TILE_W / 10));
+    }
+
+    function updateStatusDisplay() { statusText.textContent = statusMessage; }
+
+    class DominoTile { constructor(v1, v2) { this.v1 = v1; this.v2 = v2; } }
+    class Player { constructor(name, isHuman) { this.name = name; this.isHuman = isHuman; this.hand = []; } }
+
+    function shuffle(arr) { for (let i = arr.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [arr[i], arr[j]] = [arr[j], arr[i]]; } }
+
+    function initGame() {
+        const configs = getPlayerConfigs();
+        if (configs.length < 2) { alert('Минимум 2 игрока!'); return; }
+        players = [];
+        for (let i = 0; i < configs.length; i++) players.push(new Player(`Игрок ${i+1}`, configs[i].isHuman));
+        const deck = [];
+        for (let i = 1; i <= 7; i++) for (let j = i; j <= 7; j++) deck.push(new DominoTile(i, j));
+        shuffle(deck);
+        for (const p of players) p.hand = deck.splice(0, 7);
+        boneyard = deck;
+        table = [];
+        leftEnd = -1; rightEnd = -1;
+        gameOver = false;
+        pendingHandIndex = -1;
+        sidePanel.style.display = 'none';
+        cameraX = 0; cameraY = 0;
+
+        let startPlayer = 0;
+        let found = false;
+        for (let d = 1; d <= 7 && !found; d++) {
+            for (let i = 0; i < players.length; i++) {
+                if (players[i].hand.some(t => t.v1 === d && t.v2 === d)) { startPlayer = i; found = true; break; }
+            }
+        }
+        currentPlayerIndex = startPlayer;
+        statusMessage = `Ход: ${players[currentPlayerIndex].name}`;
+        updateStatusDisplay();
+        updateActionButton();
+        if (!players[currentPlayerIndex].isHuman) scheduleBotMove();
+        requestDraw();
+    }
+
+    function scheduleBotMove() { setTimeout(() => { if (gameOver || players[currentPlayerIndex].isHuman) return; botMove(); }, 600); }
+
+    function botMove() {
+        if (gameOver) return;
+        const player = players[currentPlayerIndex];
+        if (table.length === 0) { if (player.hand.length > 0) playTile(currentPlayerIndex, 0, 'right'); }
+        else {
+            for (let i = 0; i < player.hand.length; i++) {
+                if (canPlayLeft(player.hand[i]) || canPlayRight(player.hand[i])) {
+                    const side = canPlayRight(player.hand[i]) ? 'right' : 'left';
+                    playTile(currentPlayerIndex, i, side);
+                    checkWinner();
+                    if (!gameOver) nextTurn();
+                    requestDraw();
+                    return;
+                }
+            }
+            if (boneyard.length > 0) { player.hand.push(boneyard.pop()); updateActionButton(); scheduleBotMove(); requestDraw(); return; }
+            else { statusMessage = `${player.name} пропускает ход`; updateStatusDisplay(); checkWinner(); if (!gameOver) nextTurn(); requestDraw(); return; }
+        }
+        checkWinner();
+        if (!gameOver) nextTurn();
+        requestDraw();
+        if (!gameOver && !players[currentPlayerIndex].isHuman) scheduleBotMove();
+    }
+
+    function canPlayLeft(tile) { return table.length > 0 && (tile.v1 === leftEnd || tile.v2 === leftEnd); }
+    function canPlayRight(tile) { return table.length > 0 && (tile.v1 === rightEnd || tile.v2 === rightEnd); }
+    function canPlayAny(tile) { return canPlayLeft(tile) || canPlayRight(tile); }
+
+    function playTile(playerIndex, handIndex, side) {
+        const player = players[playerIndex];
+        const tile = player.hand.splice(handIndex, 1)[0];
+        if (table.length === 0) { table.push(tile); leftEnd = tile.v1; rightEnd = tile.v2; return; }
+        let newTile;
+        if (side === 'right') {
+            if (tile.v1 === rightEnd) newTile = tile;
+            else if (tile.v2 === rightEnd) newTile = new DominoTile(tile.v2, tile.v1);
+            else throw new Error('Не подходит справа');
+            table.push(newTile);
+            rightEnd = newTile.v2;
+        } else {
+            if (tile.v2 === leftEnd) newTile = tile;
+            else if (tile.v1 === leftEnd) newTile = new DominoTile(tile.v2, tile.v1);
+            else throw new Error('Не подходит слева');
+            table.unshift(newTile);
+            leftEnd = newTile.v1;
+        }
+    }
+
+    function nextTurn() {
+        currentPlayerIndex = (currentPlayerIndex + 1) % players.length;
+        statusMessage = `Ход: ${players[currentPlayerIndex].name}`;
+        updateStatusDisplay();
+        updateActionButton();
+        hideSidePanel();
+        if (!gameOver && !players[currentPlayerIndex].isHuman) scheduleBotMove();
+        requestDraw();
+    }
+
+    function checkWinner() {
+        for (let i = 0; i < players.length; i++) {
+            if (players[i].hand.length === 0) {
+                gameOver = true;
+                statusMessage = `🏆 Победил: ${players[i].name}!`;
+                updateStatusDisplay();
+                btnAction.style.display = 'none';
+                return true;
+            }
+        }
+        if (boneyard.length === 0 && players.every(p => !p.hand.some(t => canPlayAny(t)))) {
+            gameOver = true;
+            let minScore = Infinity;
+            let winners = [];
+            for (const p of players) {
+                let sum = 0;
+                for (const tile of p.hand) sum += tile.v1 + tile.v2;
+                if (sum < minScore) { minScore = sum; winners = [p]; }
+                else if (sum === minScore) winners.push(p);
+            }
+            if (winners.length === 1) {
+                statusMessage = `🏆 Победил: ${winners[0].name}! (по очкам)`;
+            } else {
+                statusMessage = '🤝 Ничья! Нажмите «Новая игра»';
+            }
+            updateStatusDisplay();
+            btnAction.style.display = 'none';
+            return true;
+        }
+        return false;
+    }
+
+    function updateActionButton() {
+        if (gameOver || players.length === 0) { btnAction.style.display = 'none'; return; }
+        const cur = players[currentPlayerIndex];
+        if (!cur.isHuman) { btnAction.style.display = 'none'; return; }
+        const hasMove = table.length === 0 || cur.hand.some(t => canPlayAny(t));
+        if (hasMove || table.length === 0) { btnAction.style.display = 'none'; return; }
+
+        if (boneyard.length > 0) {
+            btnAction.textContent = `Базар (${boneyard.length})`;
+            btnAction.style.display = 'block';
+        } else {
+            btnAction.textContent = 'Пропустить ход';
+            btnAction.style.display = 'block';
+        }
+        positionActionButton();
+    }
+
+    function positionActionButton() {
+        if (players.length === 0 || !players[currentPlayerIndex].isHuman) return;
+        const rect = getPlayerHandRect(currentPlayerIndex);
+        const btnW = btnAction.offsetWidth;
+        const btnH = btnAction.offsetHeight;
+        let left = rect.x + rect.width/2 - btnW/2;
+        let top;
+        if (rect.align === 'bottom') top = rect.y - btnH - 10;
+        else if (rect.align === 'top') top = rect.y + rect.height + 10;
+        else if (rect.align === 'left') { left = rect.x + rect.width + 10; top = rect.y + rect.height/2 - btnH/2; }
+        else if (rect.align === 'right') { left = rect.x - btnW - 10; top = rect.y + rect.height/2 - btnH/2; }
+        else top = rect.y - btnH - 10;
+        if (left < 10) left = 10;
+        if (left + btnW > canvas.width - 10) left = canvas.width - btnW - 10;
+        if (top < getTopOffset() + 5) top = getTopOffset() + 5;
+        if (top + btnH > canvas.height - 10) top = canvas.height - btnH - 10;
+        btnAction.style.left = left + 'px';
+        btnAction.style.top = top + 'px';
+        btnAction.style.transform = 'none';
+    }
+
+    function attemptHumanMove(tileIndex) {
+        if (gameOver || !players[currentPlayerIndex].isHuman) return;
+        const player = players[currentPlayerIndex];
+        if (tileIndex < 0 || tileIndex >= player.hand.length) return;
+        const tile = player.hand[tileIndex];
+        const isFirst = table.length === 0;
+        const canL = canPlayLeft(tile), canR = canPlayRight(tile);
+        if (!isFirst && !canL && !canR) { statusMessage = 'Эта кость не подходит!'; updateStatusDisplay(); requestDraw(); return; }
+        if (pendingHandIndex !== -1) hideSidePanel();
+        if (isFirst) { playTile(currentPlayerIndex, tileIndex, 'right'); checkWinner(); if (!gameOver) nextTurn(); requestDraw(); return; }
+        if (canL && canR) { pendingHandIndex = tileIndex; showSidePanel(); statusMessage = 'Выберите сторону:'; updateStatusDisplay(); requestDraw(); return; }
+        const side = canL ? 'left' : 'right';
+        playTile(currentPlayerIndex, tileIndex, side);
+        checkWinner();
+        if (!gameOver) nextTurn();
+        requestDraw();
+    }
+
+    function showSidePanel() {
+        const handRect = getPlayerHandRect(currentPlayerIndex);
+        const panelW = sidePanel.offsetWidth || 200;
+        const panelH = sidePanel.offsetHeight || 50;
+        let left = handRect.x + handRect.width/2 - panelW/2;
+        let top = handRect.y - panelH - 10;
+        if (top < getTopOffset() + 5) top = handRect.y + handRect.height + 5;
+        if (left < 5) left = 5;
+        if (left + panelW > canvas.width - 5) left = canvas.width - panelW - 5;
+        sidePanel.style.left = left + 'px';
+        sidePanel.style.top = top + 'px';
+        sidePanel.style.display = 'flex';
+    }
+
+    function hideSidePanel() { sidePanel.style.display = 'none'; pendingHandIndex = -1; }
+
+    btnLeft.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (pendingHandIndex === -1) return;
+        playTile(currentPlayerIndex, pendingHandIndex, 'left');
+        hideSidePanel();
+        checkWinner();
+        if (!gameOver) nextTurn();
+        requestDraw();
+    });
+    btnRight.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (pendingHandIndex === -1) return;
+        playTile(currentPlayerIndex, pendingHandIndex, 'right');
+        hideSidePanel();
+        checkWinner();
+        if (!gameOver) nextTurn();
+        requestDraw();
+    });
+    btnCancel.addEventListener('click', (e) => {
+        e.stopPropagation();
+        hideSidePanel();
+        statusMessage = `Ход: ${players[currentPlayerIndex].name}`;
+        updateStatusDisplay();
+        requestDraw();
+    });
+
+    function getPlayerHandRect(playerIndex) {
+        const player = players[playerIndex];
+        const count = player.hand.length;
+        const totalPlayers = players.length;
+        let align = '';
+        if (totalPlayers === 2) align = playerIndex === 0 ? 'bottom' : 'top';
+        else if (totalPlayers === 3) {
+            if (playerIndex === 0) align = 'bottom';
+            else if (playerIndex === 1) align = 'left';
+            else align = 'top';
+        } else if (totalPlayers === 4) {
+            if (playerIndex === 0) align = 'bottom';
+            else if (playerIndex === 1) align = 'left';
+            else if (playerIndex === 2) align = 'top';
+            else align = 'right';
+        }
+        const fullW = count * (TILE_W + GAP);
+        const fullH = count * (TILE_W + GAP);
+        const topOffset = getTopOffset() + 5;
+        let x = 0, y = 0, w = 0, h = 0;
+        if (align === 'bottom') { x = (canvas.width - fullW) / 2; y = canvas.height - TILE_H - 15; w = fullW; h = TILE_H + 15; }
+        else if (align === 'top') { x = (canvas.width - fullW) / 2; y = topOffset; w = fullW; h = TILE_H + 10; }
+        else if (align === 'left') { x = 10; y = (canvas.height - fullH) / 2; w = TILE_H + 15; h = fullH; }
+        else if (align === 'right') { x = canvas.width - TILE_H - 15; y = (canvas.height - fullH) / 2; w = TILE_H + 15; h = fullH; }
+        return { x, y, width: w, height: h, align };
+    }
+
+    function drawTile(tile, cx, cy, angle) {
+        ctx.save();
+        ctx.translate(cx, cy);
+        ctx.rotate(angle * Math.PI / 180);
+        ctx.fillStyle = '#f5f0e6';
+        ctx.fillRect(-TILE_W/2, -TILE_H/2, TILE_W, TILE_H);
+        ctx.strokeStyle = '#222';
+        ctx.lineWidth = 2;
+        ctx.strokeRect(-TILE_W/2, -TILE_H/2, TILE_W, TILE_H);
+        ctx.beginPath();
+        ctx.moveTo(-TILE_W/2, 0);
+        ctx.lineTo(TILE_W/2, 0);
+        ctx.stroke();
+        const drawHalf = (value, yOffset) => {
+            if (halfImages[value] && halfImages[value].complete && halfImages[value].naturalWidth > 0) {
+                ctx.drawImage(halfImages[value], -TILE_W/2, yOffset, TILE_W, TILE_H/2);
+            } else {
+                ctx.font = `bold ${Math.floor(TILE_W/2.5)}px Arial`;
+                ctx.fillStyle = '#111';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.fillText(value, 0, yOffset + TILE_H/4);
+            }
+        };
+        drawHalf(tile.v1, -TILE_H/2);
+        drawHalf(tile.v2, 0);
+        ctx.restore();
+    }
+
+    function drawHand(player, playerIndex) {
+        const rect = getPlayerHandRect(playerIndex);
+        const count = player.hand.length;
+        const isCurrent = (playerIndex === currentPlayerIndex);
+        const hidden = !player.isHuman || (player.isHuman && !isCurrent);
+        const isHoriz = (rect.align === 'bottom' || rect.align === 'top');
+        for (let i = 0; i < count; i++) {
+            const tile = player.hand[i];
+            let cx, cy;
+            if (isHoriz) { cx = rect.x + i * (TILE_W + GAP) + TILE_W/2; cy = rect.y + TILE_H/2; }
+            else { cx = rect.x + TILE_W/2; cy = rect.y + i * (TILE_W + GAP) + TILE_H/2; }
+            if (hidden) {
+                ctx.fillStyle = '#7a8c8d';
+                ctx.fillRect(cx - TILE_W/2, cy - TILE_H/2, TILE_W, TILE_H);
+                ctx.strokeStyle = '#333';
+                ctx.lineWidth = 2;
+                ctx.strokeRect(cx - TILE_W/2, cy - TILE_H/2, TILE_W, TILE_H);
+                ctx.font = `bold ${Math.floor(TILE_W/2)}px Arial`;
+                ctx.fillStyle = 'white';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.fillText('?', cx, cy);
+            } else {
+                let angle = 0;
+                if (rect.align === 'top') angle = 180;
+                else if (rect.align === 'left') angle = 270;
+                else if (rect.align === 'right') angle = 90;
+                drawTile(tile, cx, cy, angle);
+            }
+        }
+        ctx.font = `bold ${Math.max(12, TILE_W/4)}px Arial`;
+        ctx.fillStyle = '#fff';
+        ctx.textAlign = 'center';
+        ctx.shadowColor = 'black';
+        ctx.shadowBlur = 3;
+        const nameX = rect.x + (isHoriz ? rect.width/2 : -20);
+        const nameY = isHoriz ? (rect.align === 'bottom' ? rect.y - 8 : rect.y + rect.height + 16) : rect.y + rect.height/2;
+        if (!isHoriz) { ctx.save(); ctx.translate(nameX, nameY); ctx.rotate(-90 * Math.PI/180); ctx.fillText(player.name, 0, 0); ctx.restore(); }
+        else ctx.fillText(player.name, nameX, nameY);
+        ctx.shadowColor = 'transparent';
+        ctx.shadowBlur = 0;
+    }
+
+    function drawTable() {
+        if (table.length === 0) return;
+        ctx.save();
+        ctx.translate(cameraX, cameraY);
+
+        let leftLimit = 10, rightLimit = canvas.width - 10, topLimit = getTopOffset() + 5;
+        // Раньше bottomLimit ограничивал обрезку, теперь он не используется для обрезки, но для определения начальной позиции рук всё ещё может пригодиться.
+        // Убираем bottomLimit совсем.
+        for (let i = 0; i < players.length; i++) {
+            if (players[i].hand.length === 0) continue;
+            const rect = getPlayerHandRect(i);
+            if (rect.align === 'top') topLimit = Math.max(topLimit, rect.y + rect.height + 10);
+            if (rect.align === 'left') leftLimit = Math.max(leftLimit, rect.x + rect.width + 10);
+            if (rect.align === 'right') rightLimit = Math.min(rightLimit, rect.x - 10);
+        }
+
+        const usableWidth = rightLimit - leftLimit;
+        if (usableWidth <= 0) { ctx.restore(); return; }
+
+        const rows = [];
+        let currentRow = [];
+        let currentWidth = 0;
+        for (const tile of table) {
+            const isDouble = (tile.v1 === tile.v2);
+            const effW = isDouble ? TILE_W : TILE_H;
+            if (currentRow.length > 0 && currentWidth + GAP + effW > usableWidth) {
+                rows.push({ tiles: currentRow, width: currentWidth });
+                currentRow = [];
+                currentWidth = 0;
+            }
+            currentRow.push(tile);
+            if (currentWidth > 0) currentWidth += GAP;
+            currentWidth += effW;
+        }
+        if (currentRow.length > 0) rows.push({ tiles: currentRow, width: currentWidth });
+
+        let y = topLimit;
+        const rowData = [];
+        for (const row of rows) {
+            const startX = leftLimit + (usableWidth - row.width) / 2;
+            let x = startX;
+            const rowDisplay = [];
+            let rowHeight = 0;
+            for (const tile of row.tiles) {
+                const isDouble = (tile.v1 === tile.v2);
+                const effH = isDouble ? TILE_H : TILE_W;
+                if (effH > rowHeight) rowHeight = effH;
+            }
+            // Больше не обрезаем: убираем проверку на bottomLimit
+            for (const tile of row.tiles) {
+                const isDouble = (tile.v1 === tile.v2);
+                const effW = isDouble ? TILE_W : TILE_H;
+                const effH = isDouble ? TILE_H : TILE_W;
+                const angle = isDouble ? 0 : 270;
+                const centerX = x + effW / 2;
+                const centerY = y + effH / 2;
+                drawTile(tile, centerX, centerY, angle);
+                rowDisplay.push({ cx: centerX, cy: centerY, angle, last: false });
+                x += effW + GAP;
+            }
+            if (rows.indexOf(row) < rows.length - 1 && rowDisplay.length > 0) {
+                rowDisplay[rowDisplay.length - 1].last = true;
+            }
+            rowData.push({ display: rowDisplay, y, height: rowHeight });
+            y += rowHeight + GAP;
+        }
+
+        // Маркеры концов (всё в скроллируемом пространстве)
+        if (rowData.length > 0 && table.length > 0) {
+            const firstRow = rowData[0];
+            const lastRow = rowData[rowData.length - 1];
+            if (firstRow.display.length > 0) {
+                const leftTile = firstRow.display[0];
+                drawEndMarker(leftTile, 'left');
+            }
+            if (lastRow.display.length > 0) {
+                const rightTile = lastRow.display[lastRow.display.length - 1];
+                drawEndMarker(rightTile, 'right');
+            }
+        }
+
+        ctx.restore();
+    }
+
+    function drawEndMarker(tileDisplay, side) {
+        const { cx, cy, angle } = tileDisplay;
+        let markerX, markerY;
+        const r = Math.max(7, TILE_W * 0.14);
+        if (side === 'left') {
+            if (angle === 0) { markerX = cx - TILE_W/2 - r - 3; markerY = cy; }
+            else { markerX = cx - TILE_H/2 - r - 3; markerY = cy; }
+            ctx.fillStyle = '#4caf50';
+        } else {
+            if (angle === 0) { markerX = cx + TILE_W/2 + r + 3; markerY = cy; }
+            else { markerX = cx + TILE_H/2 + r + 3; markerY = cy; }
+            ctx.fillStyle = '#f44336';
+        }
+        ctx.beginPath();
+        ctx.arc(markerX, markerY, r, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = '#fff';
+        ctx.lineWidth = 2;
+        ctx.stroke();
+        ctx.font = `bold ${r * 1.2}px Arial`;
+        ctx.fillStyle = '#fff';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(side === 'left' ? 'Л' : 'П', markerX, markerY);
+    }
+
+    function requestDraw() {
+        window.requestAnimationFrame(() => {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            ctx.fillStyle = '#2e5a3b';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            if (players.length > 0) {
+                drawTable();
+                // Руки рисуем без трансляции камеры (в абсолютных координатах)
+                for (let i = 0; i < players.length; i++) drawHand(players[i], i);
+            }
+            if (btnAction.style.display === 'block') positionActionButton();
+        });
+    }
+
+    function getEventPos(e) {
+        const rect = canvas.getBoundingClientRect();
+        const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+        const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+        return { x: clientX - rect.left, y: clientY - rect.top };
+    }
+
+    function handleDown(e) {
+        e.preventDefault();
+        if (sidePanel.style.display === 'flex') return;
+        const pos = getEventPos(e);
+        if (!pos) return;
+        if (players.length > 0 && players[currentPlayerIndex].isHuman && !gameOver) {
+            const handRect = getPlayerHandRect(currentPlayerIndex);
+            if (pos.x >= handRect.x && pos.x <= handRect.x + handRect.width &&
+                pos.y >= handRect.y && pos.y <= handRect.y + handRect.height) {
+                const isHoriz = (handRect.align === 'bottom' || handRect.align === 'top');
+                let tileIndex;
+                if (isHoriz) tileIndex = Math.floor((pos.x - handRect.x) / (TILE_W + GAP));
+                else tileIndex = Math.floor((pos.y - handRect.y) / (TILE_W + GAP));
+                if (tileIndex >= 0 && tileIndex < players[currentPlayerIndex].hand.length) {
+                    attemptHumanMove(tileIndex);
+                    return;
+                }
+            }
+        }
+        isDragging = true;
+        dragStartX = pos.x - cameraX;
+        dragStartY = pos.y - cameraY;
+        dragMoved = false;
+    }
+
+    function handleMove(e) {
+        e.preventDefault();
+        if (!isDragging) return;
+        const pos = getEventPos(e);
+        if (!pos) return;
+        cameraX = pos.x - dragStartX;
+        cameraY = pos.y - dragStartY;
+        if (Math.abs(cameraX) > 2 || Math.abs(cameraY) > 2) dragMoved = true;
+        requestDraw();
+    }
+
+    function handleUp(e) {
+        e.preventDefault();
+        isDragging = false;
+        requestDraw();
+    }
+
+    canvas.addEventListener('mousedown', handleDown);
+    canvas.addEventListener('mousemove', handleMove);
+    canvas.addEventListener('mouseup', handleUp);
+    canvas.addEventListener('mouseleave', handleUp);
+    canvas.addEventListener('touchstart', handleDown, { passive: false });
+    canvas.addEventListener('touchmove', handleMove, { passive: false });
+    canvas.addEventListener('touchend', handleUp);
+    canvas.addEventListener('touchcancel', handleUp);
+
+    btnNewGame.addEventListener('click', () => { hideSidePanel(); initGame(); requestDraw(); });
+
+    btnAction.addEventListener('click', () => {
+        if (gameOver || !players[currentPlayerIndex].isHuman) return;
+        const player = players[currentPlayerIndex];
+        if (table.length === 0) return;
+        const hasMove = player.hand.some(t => canPlayAny(t));
+        if (hasMove) {
+            statusMessage = 'У вас есть ход!';
+            updateStatusDisplay();
+            requestDraw();
+            return;
+        }
+        if (boneyard.length > 0) {
+            player.hand.push(boneyard.pop());
+            updateActionButton();
+            const drawn = player.hand[player.hand.length-1];
+            statusMessage = `Взяли: ${drawn.v1}|${drawn.v2}`;
+            updateStatusDisplay();
+            requestDraw();
+        } else {
+            statusMessage = 'Ход пропущен';
+            updateStatusDisplay();
+            checkWinner();
+            if (!gameOver) nextTurn();
+            requestDraw();
+        }
+    });
+
+    window.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape' && sidePanel.style.display === 'flex') {
+            hideSidePanel();
+            statusMessage = `Ход: ${players[currentPlayerIndex].name}`;
+            updateStatusDisplay();
+            requestDraw();
+        }
+    });
+
+    window.addEventListener('resize', () => { resizeCanvas(); requestDraw(); });
+
+    loadHalfImages().then(() => {
+        setupInitialPlayers();
+        resizeCanvas();
+        requestDraw();
+    });
+    updateStatusDisplay();
+})();
+</script>
+</body>
+</html>
